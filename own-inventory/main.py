@@ -171,11 +171,15 @@ class InventoryApp:
         if not sailor_name or not sailor_contact:
             messagebox.showerror("Input Error", "Please fill all sailor fields!")
             return
+        try:
+            self.cursor.execute("INSERT INTO sailors (sailor_name, sailor_contact) VALUES (%s, %s)", (sailor_name, sailor_contact))
+            self.db.commit()
+            messagebox.showinfo("Success", "Sailor added successfully!")
+            self.entry_sailor_name.delete(0, tk.END)
+            self.entry_sailor_contact.delete(0, tk.END)
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Error: {err}")
 
-        self.sailors[sailor_name] = sailor_contact
-        self.entry_sailor_name.delete(0, tk.END)
-        self.entry_sailor_contact.delete(0, tk.END)
-        messagebox.showinfo("Sailor Added", "Sailor details added successfully!")
 
     def add_product(self):
         """ Add product to the store by the sailor """
@@ -190,13 +194,19 @@ class InventoryApp:
         if not quantity.isdigit() or not price.replace(".", "", 1).isdigit():
             messagebox.showerror("Input Error", "Invalid quantity or price!")
             return
-
+        try:
+            self.cursor.execute("INSERT INTO products (product_name, quantity, price) VALUES (%s, %s, %s)",
+                                (product_name, int(quantity), float(price)))
+            self.db.commit()
+            messagebox.showinfo("Success", "Product added successfully!")
+            self.entry_product_name.delete(0, tk.END)
+            self.entry_product_quantity.delete(0, tk.END)
+            self.entry_product_price.delete(0, tk.END)
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Error: {err}")
         self.available_products[product_name] = (int(quantity), float(price))
         self.load_products()
 
-        self.entry_product_name.delete(0, tk.END)
-        self.entry_product_quantity.delete(0, tk.END)
-        self.entry_product_price.delete(0, tk.END)
 
         messagebox.showinfo("Product Added", "Product added to available products!")
 
@@ -237,9 +247,15 @@ class InventoryApp:
         if int(quantity) > available_quantity:
             messagebox.showerror("Quantity Error", "Selected quantity exceeds available stock!")
             return
-
         self.cart.append((selected_product_name, int(quantity), self.available_products[selected_product_name][1]))
         self.update_cart_display()
+        
+        
+        self.cursor.execute(
+            "INSERT INTO cart (receiver_id, product_id, quantity) VALUES (%s, %s, %s)",
+            (receiver_id, product_id, quantity)
+        )
+        self.db.commit()
         messagebox.showinfo("Product Added", f"{selected_product_name} added to cart.")
 
     def update_cart_display(self):
