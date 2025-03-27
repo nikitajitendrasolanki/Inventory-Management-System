@@ -4,29 +4,29 @@ from time import strftime
 import mysql.connector
 
 class InventoryApp:
-    def __init__(self, root):
+    def _init_(self, root):
         self.root = root
         self.root.title("Inventory Management System")
         self.root.geometry("1000x700")  # Adjust the window size
 
-
         self.db = mysql.connector.connect(
-            host="127.0.0.1",      # MySQL server host (localhost for local MySQL server)
+            host="localhost",      # MySQL server host (localhost for local MySQL server)
             user="root",           # MySQL username
-            password="12345678",  # Your MySQL password
+            password="vcet123",    # Your MySQL password
             database="inventory"   # Database name
         )
         self.cursor = self.db.cursor()
 
         # Store Data
-        self.available_products = {}  # product_name -> (quantity, price)
-        self.cart = []  # list of (product_name, quantity, price)
+        self.available_products = {}  # product_id -> (name, quantity, price)
+        self.cart = []  # list of (product_id, name, quantity, price)
         self.sailors = {}  # sailor_name -> (sailor_contact)
         self.receivers = {}  # receiver_name -> (receiver_contact, receiver_address)
-        self.current_receiver = None  # Store current selected receiver
+        self.current_receivers = None  # Store current selected receiver
 
         # GUI Widgets Initialization
         self.create_widgets()
+        self.load_products()  # Load products when the application starts
 
     def create_widgets(self):
         # Top frame for the current date and time
@@ -160,8 +160,12 @@ class InventoryApp:
     def load_products(self):
         """ Load available products into the listbox """
         self.product_listbox.delete(0, tk.END)
-        for product_name, (quantity, price) in self.available_products.items():
-            self.product_listbox.insert(tk.END, f"{product_name} - Quantity: {quantity}, Price: ₹{price}")
+        self.available_products.clear()  # Clear the existing products
+
+        self.cursor.execute("SELECT id, name, quantity, price FROM products")
+        for (product_id, name, quantity, price) in self.cursor.fetchall():
+            self.available_products[product_id] = (name, quantity, price)
+            self.product_listbox.insert(tk.END, f"{name} - Quantity: {quantity}, Price: ₹{price:.2f}")
 
     def add_sailor(self):
         """ Add sailor details to the sailor section """
@@ -172,14 +176,13 @@ class InventoryApp:
             messagebox.showerror("Input Error", "Please fill all sailor fields!")
             return
         try:
-            self.cursor.execute("INSERT INTO sailors (sailor_name, sailor_contact) VALUES (%s, %s)", (sailor_name, sailor_contact))
+            self.cursor.execute("INSERT INTO sailors (name, contact) VALUES (%s, %s)", (sailor_name, sailor_contact))
             self.db.commit()
             messagebox.showinfo("Success", "Sailor added successfully!")
             self.entry_sailor_name.delete(0, tk.END)
             self.entry_sailor_contact.delete(0, tk.END)
         except mysql.connector.Error as err:
-            messagebox.showerror("Database Error", f"Error: {err}")
-
+            messagebox.showerror("Database Error", f"Error: {err}")
 
     def add_product(self):
         """ Add product to the store by the sailor """
@@ -195,20 +198,18 @@ class InventoryApp:
             messagebox.showerror("Input Error", "Invalid quantity or price!")
             return
         try:
-            self.cursor.execute("INSERT INTO products (product_name, quantity, price) VALUES (%s, %s, %s)",
+            self.cursor.execute("INSERT INTO products (name, quantity, price) VALUES (%s, %s, %s)",
                                 (product_name, int(quantity), float(price)))
             self.db.commit()
             messagebox.showinfo("Success", "Product added successfully!")
             self.entry_product_name.delete(0, tk.END)
             self.entry_product_quantity.delete(0, tk.END)
             self.entry_product_price.delete(0, tk.END)
+
+            # Load products from the database after adding
+            self.load_products()
         except mysql.connector.Error as err:
-            messagebox.showerror("Database Error", f"Error: {err}")
-        self.available_products[product_name] = (int(quantity), float(price))
-        self.load_products()
-
-
-        messagebox.showinfo("Product Added", "Product added to available products!")
+            messagebox.showerror("Database Error", f"Error: {err}")
 
     def save_receiver(self):
         """ Save receiver details and check if products are added to cart """
@@ -232,6 +233,20 @@ class InventoryApp:
 
         messagebox.showinfo("Receiver Saved", "Receiver details saved successfully!")
 
+        try:
+            # Insert receiver details into the receivers table
+            self.cursor.execute(
+        "INSERT INTO receivers (name, contact, address) VALUES (%s, %s, %s)",
+        (receiver_name, receiver_contact, receiver_address)  # Ensure receiver_address is included
+    )
+
+            self.db.commit()
+            messagebox.showinfo("Receiver Added", f"{receiver_name} added to the receivers list.")
+
+        except mysql.connector.Error as err:
+            # Show an error message if there was a problem
+            messagebox.showerror("Database Error", f"Error: {err}")  # Correctly reference err
+
     def add_to_cart(self):
         """ Add selected product and quantity to cart """
         selected_product = self.product_listbox.curselection()
@@ -241,28 +256,32 @@ class InventoryApp:
             messagebox.showerror("Selection Error", "Please select a product and specify quantity!")
             return
 
-        selected_product_name = self.product_listbox.get(selected_product[0]).split(" - ")[0]
-        available_quantity = self.available_products[selected_product_name][0]
+        selected_product_id = list(self.available_products.keys())[selected_product[0]]
+        product_name, available_quantity, price = self.available_products[selected_product_id]
 
         if int(quantity) > available_quantity:
             messagebox.showerror("Quantity Error", "Selected quantity exceeds available stock!")
             return
-        self.cart.append((selected_product_name, int(quantity), self.available_products[selected_product_name][1]))
+
+        self.cart.append((selected_product_id, product_name, int(quantity), price))
         self.update_cart_display()
-        
-        
-        self.cursor.execute(
-            "INSERT INTO cart (receiver_id, product_id, quantity) VALUES (%s, %s, %s)",
-            (receiver_id, product_id, quantity)
-        )
-        self.db.commit()
-        messagebox.showinfo("Product Added", f"{selected_product_name} added to cart.")
+
+        # Insert into cart table
+        try:
+            self.cursor.execute(
+                "INSERT INTO cart (product_id, product_name, quantity, price) VALUES (%s, %s, %s, %s)",
+                (selected_product_id, product_name, int(quantity), price)
+            )
+            self.db.commit()
+            messagebox.showinfo("Product Added", f"{product_name} added to cart.")
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Error: {err}")
 
     def update_cart_display(self):
         """ Update cart listbox to show current cart items """
         self.cart_listbox.delete(0, tk.END)
         for item in self.cart:
-            self.cart_listbox.insert(tk.END, f"{item[0]} - Quantity: {item[1]}, Price: ₹{item[1] * item[2]:.2f}")
+            self.cart_listbox.insert(tk.END, f"{item[1]} - Quantity: {item[2]}, Price: ₹{item[2] * item[3]:.2f}")
 
     def generate_bill(self):
         """ Generate and display bill """
@@ -278,13 +297,13 @@ class InventoryApp:
         receiver_contact, receiver_address = self.receivers[receiver_name]
 
         # Calculate total bill
-        total_amount = sum([item[1] * item[2] for item in self.cart])
+        total_amount = sum([item[2] * item[3] for item in self.cart])
 
         # Display Bill
         bill_details = f"Receiver: {receiver_name}\nContact: {receiver_contact}\nAddress: {receiver_address}\n\n"
         bill_details += "Products:\n"
         for item in self.cart:
-            bill_details += f"{item[0]} - Quantity: {item[1]}, Price: ₹{item[1] * item[2]:.2f}\n"
+            bill_details += f"{item[1]} - Quantity: {item[2]}, Price: ₹{item[2] * item[3]:.2f}\n"
         
         bill_details += f"\nTotal: ₹{total_amount:.2f}"
         self.text_bill.delete(1.0, tk.END)
@@ -295,7 +314,7 @@ class InventoryApp:
         self.update_cart_display()
         messagebox.showinfo("Bill Generated", f"Bill generated successfully for {receiver_name}")
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     root = tk.Tk()
     app = InventoryApp(root)
-    root.mainloop() 
+    root.mainloop()
